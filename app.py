@@ -97,8 +97,9 @@ if st.button("Prediksi Harga (CBR)"):
     pred, neighbors = cbr_predict(input_scaled, k=5)
     pred_idr = pred * KURS_INR_TO_IDR
 
-    st.subheader("💰 Hasil Prediksi Harga Berdasarkan Kasus Mirip (CBR)")
+    st.subheader("Hasil Prediksi Harga Berdasarkan Kasus Mirip (CBR)")
     st.success(f"Estimasi harga mobil: Rp {pred_idr:,.0f}")
 
     st.subheader("📌 Kasus yang Paling Mirip (Retrieve)")
     st.dataframe(neighbors)
+
