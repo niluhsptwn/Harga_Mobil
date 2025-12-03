@@ -1,13 +1,11 @@
 import streamlit as st
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.neighbors import KNeighborsRegressor
 import numpy as np
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 
-st.title("🚗 Prediksi Harga Mobil – KNN (CarDekho Dataset)")
+st.title("🚗 Sistem CBR Prediksi Harga Mobil – CarDekho Dataset")
 
-# LOAD DATASET
+# ========== LOAD DATASET ==========
 @st.cache_data
 def load_data():
     df = pd.read_csv("CAR DETAILS FROM CAR DEKHO.csv")
@@ -15,41 +13,31 @@ def load_data():
 
 df = load_data()
 
-# PREPROCESSING
-df_processed = df.copy()
+# ========== PREPROCESSING UNTUK CBR ==========
+df_cbr = df.copy()
 
-# Label Encode kolom kategorikal
+# Label Encoding
 label_cols = ["name", "fuel", "seller_type", "transmission", "owner"]
 encoders = {}
 
 for col in label_cols:
     enc = LabelEncoder()
-    df_processed[col] = enc.fit_transform(df_processed[col])
+    df_cbr[col] = enc.fit_transform(df_cbr[col])
     encoders[col] = enc
 
+# Normalisasi fitur (CBR butuh jarak yang fair)
+scaler = MinMaxScaler()
 
-# Fitur & target
-X = df_processed.drop("selling_price", axis=1)
-y = df_processed["selling_price"]
+feature_cols = df_cbr.drop("selling_price", axis=1).columns
+df_cbr_scaled = scaler.fit_transform(df_cbr[feature_cols])
 
-# Standarisasi
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+# Dataset setelah scaling
+df_scaled = pd.DataFrame(df_cbr_scaled, columns=feature_cols)
+df_scaled["selling_price"] = df_cbr["selling_price"]
 
-# Split data
-X_train, X_test, y_train, y_test = train_test_split(
-    X_scaled, y, test_size=0.2, random_state=42
-)
+# ========== FORM INPUT ==========
+st.subheader("🔧 Input Data Mobil:")
 
-# Moodel KNN
-model = KNeighborsRegressor(n_neighbors=5)
-model.fit(X_train, y_train)
-
-
-# Form Input
-st.subheader("Form Input Prediksi:")
-
-# Input user
 col1, col2 = st.columns(2)
 
 with col1:
@@ -65,32 +53,52 @@ with col2:
     owner = st.selectbox("Status Kepemilikan", df["owner"].unique())
 
 # Encode input
-input_data = pd.DataFrame({
-    "name": [encoders["name"].transform([name])[0]],
-    "year": [year],
-    "selling_price": [0],
-    "km_driven": [km_driven],
-    "fuel": [encoders["fuel"].transform([fuel])[0]],
-    "seller_type": [encoders["seller_type"].transform([seller_type])[0]],
-    "transmission": [encoders["transmission"].transform([transmission])[0]],
-    "owner": [encoders["owner"].transform([owner])[0]],
-    "seats": [seats]
-})
+input_raw = {
+    "name": encoders["name"].transform([name])[0],
+    "year": year,
+    "km_driven": km_driven,
+    "fuel": encoders["fuel"].transform([fuel])[0],
+    "seller_type": encoders["seller_type"].transform([seller_type])[0],
+    "transmission": encoders["transmission"].transform([transmission])[0],
+    "owner": encoders["owner"].transform([owner])[0],
+    "seats": seats
+}
 
-# Hapus kolom selling_price
-input_data = input_data.drop("selling_price", axis=1)
+input_df = pd.DataFrame([input_raw])
+input_df = input_df[feature_cols]
+input_scaled = scaler.transform(input_df)
 
-input_data = input_data[X.columns]
+# ========== CBR FUNCTION ==========
+def cbr_predict(input_case, k=5):
+    """
+    CBR = Cari K kasus terdekat → Ambil harga rata-rata → Prediksi
+    """
 
-# Scaling input
-input_scaled = scaler.transform(input_data)
+    # Data fitur tanpa selling_price
+    case_base = df_scaled.drop("selling_price", axis=1).values
 
-KURS_INR_TO_IDR = 190 # contoh rata-rata 1 INR ≈ 190 IDR
+    # Hitung jarak euclidean
+    distances = np.linalg.norm(case_base - input_case, axis=1)
 
-# Prediksi
-if st.button("Prediksi Harga"):
-    pred = model.predict(input_scaled)[0]
+    # Ambil K terdekat
+    nearest_idx = distances.argsort()[:k]
+    nearest_cases = df_scaled.iloc[nearest_idx]
+
+    # Reuse → rata-rata harga
+    predicted_price = nearest_cases["selling_price"].mean()
+
+    return predicted_price, nearest_cases
+
+
+KURS_INR_TO_IDR = 190  # konversi INR → IDR
+
+# ========== PREDIKSI ==========
+if st.button("Prediksi Harga (CBR)"):
+    pred, neighbors = cbr_predict(input_scaled, k=5)
     pred_idr = pred * KURS_INR_TO_IDR
-    
-    st.subheader("Hasil Prediksi Harga")
-    st.success(f"Perkiraan harga mobil: Rp {pred_idr:,.0f}")
+
+    st.subheader("💰 Hasil Prediksi Harga Berdasarkan Kasus Mirip (CBR)")
+    st.success(f"Estimasi harga mobil: Rp {pred_idr:,.0f}")
+
+    st.subheader("📌 Kasus yang Paling Mirip (Retrieve)")
+    st.dataframe(neighbors)
